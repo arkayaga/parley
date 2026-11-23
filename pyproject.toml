@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: talks to the real speech service (deselect with -m 'not live')"]
+addopts = "-m 'not live'"

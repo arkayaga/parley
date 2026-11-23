@@ -1,0 +1,53 @@
+name: Speech engine watch
+
+# Once a week: if a newer edge-tts is on PyPI and it passes the live speech
+# test, open a pull request that bundles it. Installed apps already repair
+# themselves at runtime; this keeps new installs up to date as well.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compare versions
+        id: v
+        run: |
+          pinned=$(grep -oP '^edge-tts==\K[^ ;]+' requirements.txt)
+          latest=$(curl -s https://pypi.org/pypi/edge-tts/json | python -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Pinned $pinned, latest $latest"
+
+      - name: Test the new version
+        if: steps.v.outputs.pinned != steps.v.outputs.latest
+        run: |
+          sed -i "s/^edge-tts==.*/edge-tts==${{ steps.v.outputs.latest }}/" requirements.txt
+          pip install edge-tts==${{ steps.v.outputs.latest }} pytest
+          python -m pytest -q -m live
+
+      - name: Open pull request
+        if: steps.v.outputs.pinned != steps.v.outputs.latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch="edge-tts-${{ steps.v.outputs.latest }}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then echo "PR branch exists"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "Bundle edge-tts ${{ steps.v.outputs.latest }}"
+          git push origin "$branch"
+          gh pr create --title "Bundle edge-tts ${{ steps.v.outputs.latest }}" \
+            --body "edge-tts ${{ steps.v.outputs.latest }} passed the live speech test. Merge, bump parley/version.py and push a v* tag to release it."
