@@ -17,8 +17,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -75,7 +75,7 @@ jobs:
           "$hash  ParleySetup.exe" | Out-File -Encoding ascii -NoNewline out\ParleySetup.exe.sha256
           Get-ChildItem out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Parley-Windows
           path: out/*
@@ -85,14 +85,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14        # Apple Silicon (M1 and newer)
+          - runner: macos-15        # Apple Silicon (M1 and newer)
             suffix: ""
           - runner: macos-15-intel  # Intel Macs
             suffix: "-Intel"
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -134,7 +134,7 @@ jobs:
           for f in *; do shasum -a 256 "$f" | awk -v n="$f" '{printf "%s  %s", $1, n}' > "$f.sha256"; done
           ls -l
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Parley-macOS${{ matrix.suffix }}
           path: out/*
@@ -145,7 +145,7 @@ jobs:
     needs: [windows, macos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: out
           merge-multiple: true
