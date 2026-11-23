@@ -1,44 +1,21 @@
-"""Read text from an image with the OCR engine built into Windows 10/11.
-
-Nothing leaves the computer. On other systems ``available()`` is False.
-"""
+"""Windows text recognition backend (Windows.Media.Ocr)."""
 from __future__ import annotations
 
 import asyncio
-import re
-import sys
-
-from .script import looks_like_dialogue
-
-_PREFIX = re.compile(r"^([A-Za-z][A-Za-z .’'\-]{0,35})\s*[:：]\s*(.*)$")
-MAX_BYTES = 30 * 1024 * 1024
 
 
 def available() -> bool:
-    if sys.platform != "win32":
-        return False
-    try:
-        from winrt.windows.media.ocr import OcrEngine
+    from winrt.windows.media.ocr import OcrEngine
 
-        return OcrEngine.try_create_from_user_profile_languages() is not None
-    except Exception:
-        return False
-
-
-def clean_line(text: str) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"^[•▪●]\s*", "", text)  # bullets
-    text = re.sub(r"([.!?])(?=(?:[A-Z][a-z]|I\b))", r"\1 ", text)  # missing space after a sentence
-    match = _PREFIX.match(text)
-    if match:
-        text = f"{match[1].strip()}: {match[2].strip()}".rstrip()
-    return text
+    return OcrEngine.try_create_from_user_profile_languages() is not None
 
 
 async def _recognize(data: bytes) -> list[str]:
     from winrt.windows.graphics.imaging import BitmapDecoder
     from winrt.windows.media.ocr import OcrEngine
     from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+
+    from .ocr import merge_rows
 
     stream = InMemoryRandomAccessStream()
     writer = DataWriter(stream)
@@ -52,22 +29,21 @@ async def _recognize(data: bytes) -> list[str]:
     engine = OcrEngine.try_create_from_user_profile_languages()
     if engine is None:
         raise ValueError("Windows has no text recognition language installed.")
-    if bitmap.pixel_width > OcrEngine.max_image_dimension or bitmap.pixel_height > OcrEngine.max_image_dimension:
-        raise ValueError(f"The image is too large to read (max {OcrEngine.max_image_dimension} pixels per side).")
+    limit = OcrEngine.max_image_dimension
+    if bitmap.pixel_width > limit or bitmap.pixel_height > limit:
+        raise ValueError(f"The image is too large to read (max {limit} pixels per side).")
     result = await engine.recognize_async(bitmap)
-    return [line.text for line in result.lines]
+    boxes = []
+    for line in result.lines:
+        words = list(line.words)
+        if not words:
+            continue
+        top = min(w.bounding_rect.y for w in words)
+        bottom = max(w.bounding_rect.y + w.bounding_rect.height for w in words)
+        left = min(w.bounding_rect.x for w in words)
+        boxes.append((left, top, max(1.0, bottom - top), line.text))
+    return merge_rows(boxes)
 
 
-def read_image(data: bytes) -> dict:
-    if len(data) > MAX_BYTES:
-        raise ValueError("Images can be up to 30 MB.")
-    try:
-        lines = asyncio.run(_recognize(data))
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise ValueError("The image could not be read. Try a PNG or JPG file.") from exc
-    text = "\n".join(clean_line(l) for l in lines if l.strip())
-    if not text.strip():
-        raise ValueError("No readable text was found. Try a sharper or closer image.")
-    return {"text": text, "dialogue": looks_like_dialogue(text)}
+def recognize(data: bytes) -> list[str]:
+    return asyncio.run(_recognize(data))

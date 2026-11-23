@@ -17,7 +17,7 @@ engine_update.activate_saved()
 
 import webview  # noqa: E402
 
-from parley import ocr_win, profiles, project, tts, updater  # noqa: E402
+from parley import ocr, profiles, project, tts, updater  # noqa: E402
 from parley.cache import ClipCache  # noqa: E402
 from parley.paths import resource_dir  # noqa: E402
 from parley.script import decode_text_file, looks_like_dialogue, parse_script  # noqa: E402
@@ -56,7 +56,7 @@ class Api:
     def init(self):
         return {
             "version": VERSION, "repo": GITHUB_REPO, "platform": sys.platform,
-            "ocr": ocr_win.available(), "engine": engine_update.current_version(),
+            "ocr": ocr.available(), "engine": engine_update.current_version(),
             "engineCustom": engine_update.is_custom(), "settings": project.load_settings(),
         }
 
@@ -201,9 +201,9 @@ class Api:
             return _error(exc)
 
     def _ocr(self, data):
-        if not ocr_win.available():
-            raise ValueError("Reading text from images needs Windows 10 or 11.")
-        result = ocr_win.read_image(data)
+        if not ocr.available():
+            raise ValueError("Reading text from images is not available on this computer.")
+        result = ocr.read_image(data)
         return self.parse_text(result["text"]) if result["dialogue"] else {"ok": True, "mode": "narration",
                                                                             "text": result["text"]}
 
@@ -261,13 +261,14 @@ class Api:
     def install_update(self):
         if not self.update_info:
             return _error(ValueError("No update is available."))
-        if sys.platform != "win32":
+        if not updater.can_self_install(self.update_info):  # running from source, or no asset for this OS
             webbrowser.open(self.update_info["page"])
             return {"ok": True, "browser": True}
         try:
             updater.download_and_install(self.update_info)
         except Exception as exc:
-            return _error(exc)
+            webbrowser.open(self.update_info["page"])
+            return _error(RuntimeError(f"{exc} The download page has been opened instead."))
         threading.Timer(0.5, lambda: os._exit(0)).start()
         return {"ok": True}
 
@@ -342,10 +343,10 @@ def selftest(out: str, image: str | None = None) -> None:
         report["speech_seconds"] = round(result["seconds"], 2)
     except Exception as exc:
         report["speech_error"] = f"{type(exc).__name__}: {exc}"
-    report["ocr_available"] = ocr_win.available()
+    report["ocr_available"] = ocr.available()
     if image and report["ocr_available"]:
         try:
-            report["ocr"] = ocr_win.read_image(Path(image).read_bytes())
+            report["ocr"] = ocr.read_image(Path(image).read_bytes())
         except Exception as exc:
             report["ocr_error"] = str(exc)
     report["ui_present"] = (resource_dir() / "ui" / "index.html").exists()

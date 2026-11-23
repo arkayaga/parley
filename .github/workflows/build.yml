@@ -1,8 +1,8 @@
 name: Build
 
-# Every push builds the Windows installer and keeps it as a downloadable artifact.
-# Pushing a tag like v1.2.0 also publishes a GitHub Release, which installed
-# copies of Parley pick up through their in-app update check.
+# Every push builds Parley for Windows and macOS and keeps the results as
+# downloadable artifacts. Pushing a tag like v1.2.0 also publishes a GitHub
+# Release, which installed copies of Parley offer as an in-app update.
 on:
   push:
     branches: [main]
@@ -18,7 +18,6 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -53,7 +52,7 @@ jobs:
       - name: Self-test the built app (speech, image reading, UI files)
         shell: pwsh
         run: |
-          $p = Start-Process dist\Parley\Parley.exe -ArgumentList '--selftest', "$PWD\selftest.json", "$PWD\tests\fixtures\dialogue.png" -Wait -PassThru
+          Start-Process dist\Parley\Parley.exe -ArgumentList '--selftest', "$PWD\selftest.json", "$PWD\tests\fixtures\dialogue.png" -Wait
           Get-Content selftest.json
           $r = Get-Content selftest.json | ConvertFrom-Json
           if (-not $r.ui_present) { throw "UI files missing from the build" }
@@ -70,22 +69,90 @@ jobs:
           }
           $version = python -c "from parley.version import VERSION; print(VERSION)"
           iscc /DAppVersion=$version packaging\installer.iss
-          $hash = (Get-FileHash dist\ParleySetup.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  ParleySetup.exe" | Out-File -Encoding ascii -NoNewline dist\ParleySetup.exe.sha256
-          Get-Item dist\ParleySetup.exe | Select-Object Name, Length
+          New-Item -ItemType Directory -Force out | Out-Null
+          Move-Item dist\ParleySetup.exe out\
+          $hash = (Get-FileHash out\ParleySetup.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  ParleySetup.exe" | Out-File -Encoding ascii -NoNewline out\ParleySetup.exe.sha256
+          Get-ChildItem out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ParleySetup
-          path: |
-            dist/ParleySetup.exe
-            dist/ParleySetup.exe.sha256
+          name: Parley-Windows
+          path: out/*
 
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14        # Apple Silicon (M1 and newer)
+            suffix: ""
+          - runner: macos-15-intel  # Intel Macs
+            suffix: "-Intel"
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Build app
+        run: |
+          python packaging/build_support.py
+          pyinstaller --noconfirm --clean --distpath dist --workpath build/pyi packaging/parley.spec
+
+      - name: Self-test the built app
+        run: |
+          dist/Parley.app/Contents/MacOS/Parley --selftest "$PWD/selftest.json" "$PWD/tests/fixtures/dialogue.png"
+          cat selftest.json
+          python - <<'EOF'
+          import json
+          r = json.load(open("selftest.json"))
+          assert r["ui_present"] and r["frozen"], r
+          assert not (r["ocr_available"] and r.get("ocr_error")), r
+          if r.get("speech_error"):
+              print("::warning::Speech failed in CI: " + r["speech_error"])
+          EOF
+
+      - name: Package (DMG for first install, ZIP for in-app updates)
+        run: |
+          mkdir -p out dmg
+          cp -R dist/Parley.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -quiet -volname Parley -srcfolder dmg -ov -format UDZO "out/Parley${{ matrix.suffix }}.dmg"
+          ditto -c -k --keepParent dist/Parley.app "out/Parley-macOS${{ matrix.suffix }}.zip"
+          cd out
+          for f in *; do shasum -a 256 "$f" | awk -v n="$f" '{printf "%s  %s", $1, n}' > "$f.sha256"; done
+          ls -l
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Parley-macOS${{ matrix.suffix }}
+          path: out/*
+
+  release:
+    # Publish even if one Mac flavour failed, as long as Windows built; missing files are simply absent.
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/ParleySetup.exe dist/ParleySetup.exe.sha256 \
+          ls -l out
+          gh release create "${GITHUB_REF_NAME}" out/* --repo "${GITHUB_REPOSITORY}" \
             --title "Parley ${GITHUB_REF_NAME#v}" --generate-notes

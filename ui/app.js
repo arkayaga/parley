@@ -586,7 +586,7 @@ document.addEventListener("drop", async (e) => {
   if (/\.parley$/i.test(file.name)) {
     try { const p = JSON.parse(await file.text()); loadState(p, { name: file.name.replace(/\.parley$/i, "") }); } catch { toast("That project file could not be opened.", { error: true }); }
   } else if (file.type.startsWith("image/")) {
-    if (!S.ocr) return toast("Reading text from images needs Windows 10 or 11.", { error: true });
+    if (!S.ocr) return toast("Reading text from images is not available on this computer.", { error: true });
     const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result.split(",")[1]); fr.readAsDataURL(file); });
     busyOverlay("Reading text from the image…"); const r = await api.read_image_data(b64); busyOverlay(null); applyParsed(r);
   } else if (/\.txt$/i.test(file.name) || file.type.startsWith("text/")) {
