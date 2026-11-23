@@ -17,6 +17,7 @@ Parley updates itself: when a new version is published, a bar at the top of the 
 
 - **Narration or dialogue.** Read a single text with one voice, or write a conversation line by line and give every character their own voice.
 - **47 English neural voices in 14 accents**: American, British, Australian, Canadian, Indian, Irish, New Zealand, South African and more. 300+ voices in other languages can be switched on in Settings.
+- **Voice profiles.** 43 ready-made roles for everyday classroom dialogues (Teacher, Student, Waiter, Customer, Receptionist, Doctor, Interviewer and more), each with its own voice. A character named after a profile gets that voice automatically; "Student A" and "Student B" get two different voices. Edit, delete or add your own profiles; they are kept on the computer and can be exported to share with colleagues.
 - **Per-character speed and pitch.**
 - **Listen before you save.** The audio plays inside the app and highlights the line being spoken. Click ▶ next to any line to jump to it.
 - **Save as MP3**, plus optional **subtitles (.srt)** with sentence timings.

@@ -22,6 +22,9 @@
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m4 17 5-5 4 4 2.5-2.5L20 18"/></symbol>
   <symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19V5a1.5 1.5 0 0 1 1-1.5z"/><path d="M14 3.5V8h4"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18" cy="12" r="1.4" fill="currentColor"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-bookmark-fill" viewBox="0 0 24 24"><path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4-6 4V5.5a1 1 0 0 1 1-1z" fill="currentColor"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M11 7 6 12l5 5M6 12h12"/></symbol>
   <symbol id="i-fwd" viewBox="0 0 24 24"><path d="m13 7 5 5-5 5M18 12H6"/></symbol>
 </svg>
@@ -137,6 +140,10 @@
         <label class="switch"><input type="checkbox" id="allLanguages"><span></span></label></div>
     </div>
     <div class="group">
+      <div class="row"><div><div class="label">Voice profiles</div><div class="sub" id="profilesInfo"></div></div>
+        <button class="btn" id="manageProfilesBtn">Manage</button></div>
+    </div>
+    <div class="group">
       <div class="row"><div><div class="label">Speech engine</div><div class="sub" id="engineInfo"></div></div>
         <button class="btn" id="repairBtn">Repair</button></div>
       <div class="row" id="resetEngineRow" hidden><div class="sub">Using a downloaded engine.</div><button class="link" id="resetEngineBtn">Restore built-in</button></div>
@@ -150,6 +157,24 @@
     <p class="fine">Text is sent to Microsoft’s online speech service to create audio. Parley is free software and is not a Microsoft product. Images are read on this computer and never uploaded.
       <button class="link" id="licensesBtn">Licenses</button> · <button class="link" id="githubBtn">GitHub</button></p>
     <pre class="licenses" id="licenses" hidden></pre>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="profilesSheet" hidden>
+  <div class="sheet wide" role="dialog" aria-modal="true" aria-labelledby="profilesTitle">
+    <div class="sheet-head"><h2 id="profilesTitle">Voice profiles</h2><button class="icon-btn only-icon" data-close-profiles><svg><use href="#i-x"/></svg></button></div>
+    <p class="sub sheet-intro">When a character in your script has one of these names, Parley gives it this voice automatically.
+      Names like “Student A” and “Student B” get the profile’s first and second voice.</p>
+    <div class="search"><svg><use href="#i-search"/></svg><input id="profileSearch" type="search" placeholder="Search profiles"></div>
+    <div id="profileList" class="profile-list"></div>
+    <datalist id="profileNames"></datalist>
+    <div class="sheet-foot">
+      <button class="btn" id="addProfileBtn"><svg><use href="#i-plus"/></svg>New profile</button>
+      <span class="spacer"></span>
+      <button class="link" id="importProfilesBtn">Import…</button>
+      <button class="link" id="exportProfilesBtn">Export…</button>
+      <button class="link muted" id="resetProfilesBtn">Restore defaults</button>
+    </div>
   </div>
 </div>
 

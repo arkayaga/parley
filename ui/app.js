@@ -7,7 +7,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 
 const HUES = [215, 340, 150, 28, 268, 190, 5, 95, 300, 50];
 const DEFAULT_VOICES = ["en-US-AvaNeural", "en-US-AndrewNeural", "en-GB-SoniaNeural", "en-GB-RyanNeural",
-  "en-US-EmmaNeural", "en-US-BrianNeural", "en-AU-NatashaNeural", "en-AU-WilliamNeural"];
+  "en-US-EmmaNeural", "en-US-BrianNeural", "en-AU-NatashaNeural", "en-AU-WilliamMultilingualNeural"];
 const FEMALE = /^(woman|girl|mother|mom|mum|mrs|ms|miss|lady|she|female|grandma|aunt|sister|daughter|queen|waitress)\b/i;
 const MALE = /^(man|boy|father|dad|mr|sir|he|male|grandpa|uncle|brother|son|king|waiter)\b/i;
 const EXAMPLE = [
@@ -20,7 +20,7 @@ const EXAMPLE = [
 
 const S = {
   mode: "dialogue", narration: "", lines: [], cast: {}, order: [], gap: 400,
-  voices: [], allLanguages: false, accent: "en", ocr: false,
+  voices: [], profiles: [], allLanguages: false, accent: "en", ocr: false,
   path: null, name: "", dirty: false, busy: false,
   audio: null, stale: false, lastSaved: null, update: null, info: {},
 };
@@ -38,6 +38,12 @@ const mock = {
     lines: t.split(/\n/).filter(Boolean).map((l) => { const m = l.match(/^([^:]{1,60}):\s*(.*)$/); return { speaker: m ? m[1].trim() : "Narrator", text: m ? m[2] : l }; }) }),
   parse_dialogue: async (t) => mock.parse_text(t),
   set_settings: async () => true, set_dirty: async () => {}, cache_size: async () => 0,
+  get_profiles: async () => [
+    { name: "Narrator", voice: "en-US-AvaNeural", alt: null, rate: 0, pitch: 0, aliases: [], group: "General" },
+    { name: "Teacher", voice: "en-GB-SoniaNeural", alt: "en-US-AndrewNeural", rate: 0, pitch: 0, aliases: ["Tutor"], group: "Campus" },
+    { name: "Student", voice: "en-US-AndrewNeural", alt: "en-US-EmmaNeural", rate: 0, pitch: 0, aliases: [], group: "Campus" },
+    { name: "Waiter", voice: "en-US-BrianNeural", alt: null, rate: 0, pitch: 0, aliases: ["Server"], group: "Food & shopping" }],
+  save_profiles: async (p) => ({ ok: true, profiles: p }),
 };
 const api = new Proxy({}, { get: (_, k) => (...a) => (window.pywebview?.api?.[k] ?? mock[k] ?? (async () => ({ ok: false })))(...a) });
 
@@ -80,16 +86,61 @@ function status(text, error = false) { const s = $("#status"); s.textContent = t
 function busyOverlay(text) { $("#busyOverlay").hidden = !text; if (text) $("#busyText").textContent = text; }
 
 /* ---------- state helpers ---------- */
+/* Voice profiles: a character named like a profile (or one of its aliases) gets
+   its voice. "Student A"/"Student B" or "Student 1"/"Student 2" use the
+   profile's first and second voice. */
+const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+function findProfile(key) {
+  return S.profiles.find((p) => norm(p.name) === key || (p.aliases || []).some((a) => norm(a) === key));
+}
+function profileMatch(name) {
+  const n = norm(name);
+  const exact = findProfile(n);
+  if (exact) return { p: exact, variant: 0 };
+  const m = n.match(/^(.+?) ([a-z]|\d{1,2})$/);
+  if (!m) return null;
+  const p = findProfile(m[1]);
+  if (!p) return null;
+  return { p, variant: /\d/.test(m[2]) ? Math.max(0, Number(m[2]) - 1) : m[2].charCodeAt(0) - 97 };
+}
 function characterFor(name) {
   if (!S.cast[name]) {
     const i = Object.keys(S.cast).length;
-    let voice = DEFAULT_VOICES[i % DEFAULT_VOICES.length];
-    if (FEMALE.test(name)) voice = "en-US-AvaNeural";
-    if (MALE.test(name)) voice = "en-US-AndrewNeural";
-    if (name === "Narrator") voice = "en-US-AvaNeural";
-    S.cast[name] = { name, voice, rate: 0, pitch: 0, hue: HUES[i % HUES.length], tune: false };
+    let voice = DEFAULT_VOICES[i % DEFAULT_VOICES.length], rate = 0, pitch = 0;
+    const match = profileMatch(name);
+    if (match) {
+      const { p, variant } = match;
+      voice = variant === 0 ? p.voice : variant === 1 && p.alt ? p.alt : DEFAULT_VOICES[(i + variant) % DEFAULT_VOICES.length];
+      rate = p.rate || 0; pitch = p.pitch || 0;
+    } else if (FEMALE.test(name)) voice = "en-US-AvaNeural";
+    else if (MALE.test(name)) voice = "en-US-AndrewNeural";
+    S.cast[name] = { name, voice, rate, pitch, hue: HUES[i % HUES.length], tune: false };
   }
   return S.cast[name];
+}
+const ownProfile = (c) => S.profiles.find((p) => p.name.toLowerCase() === c.name.toLowerCase());
+const inSync = (c, p) => p && p.voice === c.voice && (p.rate || 0) === c.rate && (p.pitch || 0) === c.pitch;
+let profileSaveTimer;
+async function persistProfiles(now = false) {
+  clearTimeout(profileSaveTimer);
+  const run = async () => {
+    const r = await api.save_profiles(S.profiles);
+    if (!r.ok) return toast(r.error || "Could not save the voice profiles.", { error: true });
+    S.profiles = r.profiles; fillProfileNames();
+  };
+  if (now) return run();
+  profileSaveTimer = setTimeout(run, 400);
+}
+async function saveAsProfile(c) {
+  const existing = ownProfile(c);
+  if (existing) Object.assign(existing, { voice: c.voice, rate: c.rate, pitch: c.pitch });
+  else S.profiles.unshift({ name: c.name, voice: c.voice, alt: null, rate: c.rate, pitch: c.pitch, aliases: [], group: "My profiles" });
+  await persistProfiles(true);
+  toast(existing ? `Updated the “${c.name}” profile.` : `Saved “${c.name}” as a voice profile. New characters with this name will sound the same.`);
+  renderCast();
+}
+function fillProfileNames() {
+  $("#profileNames").innerHTML = S.profiles.map((p) => `<option value="${esc(p.name)}">`).join("");
 }
 function speakers() {
   if (S.mode === "narration") return ["Narrator"];
@@ -219,6 +270,7 @@ function lineEl(line) {
 function askName(anchor, done) {
   const input = document.createElement("input");
   input.className = "speaker"; input.placeholder = "Name"; input.style.setProperty("--h", 215); input.maxLength = 60;
+  input.setAttribute("list", "profileNames");
   input.style.background = "var(--field)"; input.style.color = "var(--ink)"; input.style.width = "132px";
   anchor.replaceWith(input); input.focus();
   let finished = false;
@@ -289,22 +341,28 @@ function renderCast() {
   const box = $("#cast"); box.innerHTML = "";
   for (const name of speakers()) {
     const c = characterFor(name);
+    const own = ownProfile(c), synced = inSync(c, own), match = !own && profileMatch(name);
+    const note = synced ? "Voice profile" : own ? "Changed from its voice profile" : match ? `From the “${esc(match.p.name)}” profile` : "";
     const el = document.createElement("div"); el.className = "character"; el.style.setProperty("--h", c.hue);
     el.innerHTML = `<div class="char-top"><span class="dot"></span>
         <input class="char-name" value="${esc(name)}" maxlength="60" aria-label="Character name" ${S.mode === "narration" ? "readonly" : ""}>
         <button class="mini ${c.tune ? "active" : ""} tune" title="Speed and pitch"><svg><use href="#i-sliders"/></svg></button>
-        <button class="mini listen" title="Listen to this voice"><svg><use href="#i-speaker"/></svg></button></div>
+        <button class="mini listen" title="Listen to this voice"><svg><use href="#i-speaker"/></svg></button>
+        <button class="mini save-profile ${synced ? "active" : ""}" title="${synced ? `Saved as the “${esc(own.name)}” profile` : own ? `Update the “${esc(own.name)}” profile` : "Save as a voice profile"}"><svg><use href="${synced ? "#i-bookmark-fill" : "#i-bookmark"}"/></svg></button></div>
+      ${note ? `<div class="char-sub">${note}</div>` : ""}
       <select class="voice-select" aria-label="Voice for ${esc(name)}">${voiceOptions(c.voice)}</select>
       <div class="tuning" ${c.tune ? "" : "hidden"}>
         <span>Speed</span><input type="range" class="rate" min="-50" max="100" step="5" value="${c.rate}"><output>${c.rate ? (c.rate > 0 ? "+" : "") + c.rate + "%" : "Normal"}</output>
         <span>Pitch</span><input type="range" class="pitch" min="-50" max="50" step="5" value="${c.pitch}"><output>${c.pitch ? (c.pitch > 0 ? "+" : "") + c.pitch : "Normal"}</output>
       </div>`;
-    $(".voice-select", el).onchange = (e) => { c.voice = e.target.value; markDirty(); };
+    $(".voice-select", el).onchange = (e) => { c.voice = e.target.value; markDirty(); renderCast(); };
     $(".tune", el).onclick = () => { c.tune = !c.tune; renderCast(); };
     $(".listen", el).onclick = (e) => preview(c, e.currentTarget);
+    $(".save-profile", el).onclick = () => { if (!synced) saveAsProfile(c); else toast(`“${c.name}” already matches its voice profile. Change it under Settings → Voice profiles.`); };
     for (const [cls, key, unit] of [["rate", "rate", "%"], ["pitch", "pitch", ""]]) {
       const r = $("." + cls, el); setRangeFill(r);
       r.oninput = () => { c[key] = Number(r.value); setRangeFill(r); r.nextElementSibling.textContent = c[key] ? (c[key] > 0 ? "+" : "") + c[key] + unit : "Normal"; markDirty(); };
+      r.onchange = () => renderCast();
     }
     const nameInput = $(".char-name", el);
     nameInput.onkeydown = (e) => { if (e.key === "Enter") nameInput.blur(); };
@@ -510,7 +568,6 @@ const actions = {
 function loadExample() {
   loadState({ mode: "dialogue", narration: "", gap_ms: 400, characters: [],
     lines: EXAMPLE.map(([speaker, text]) => ({ speaker, text })) }, { name: "Example" });
-  S.cast.Customer.voice = "en-GB-RyanNeural"; renderCast();
 }
 async function saveProject() {
   if (S.mode === "dialogue" && S.textEdit && !(await applyTextEdit())) return;
@@ -544,6 +601,7 @@ function openSettings() {
   $("#engineInfo").textContent = `edge-tts ${S.info.engine}${S.info.engineCustom ? " (downloaded)" : ""} · repairs itself when the service changes`;
   $("#resetEngineRow").hidden = !S.info.engineCustom;
   $("#versionInfo").textContent = `Parley ${S.info.version}`;
+  $("#profilesInfo").textContent = `${S.profiles.length} profiles · characters with these names get their voice automatically`;
   api.cache_size().then((b) => ($("#cacheInfo").textContent = `${(b / 1048576).toFixed(1)} MB · speeds up re-creating unchanged lines.`));
 }
 $("#settingsBtn").onclick = openSettings;
@@ -564,6 +622,89 @@ $("#checkUpdateBtn").onclick = async () => {
 $("#clearCacheBtn").onclick = async () => { await api.clear_cache(); openSettings(); toast("Audio cache cleared."); };
 $("#licensesBtn").onclick = async () => { const p = $("#licenses"); if (p.hidden) p.textContent = await api.licenses(); p.hidden = !p.hidden; };
 $("#githubBtn").onclick = () => api.open_url(`https://github.com/${S.info.repo || "arkayaga/parley"}`);
+
+/* ---------- voice profile manager ---------- */
+function allVoiceOptions(current) {
+  const list = S.voices.filter((v) => S.allLanguages || v.Locale.startsWith("en-"));
+  if (current && !list.some((v) => v.ShortName === current)) list.unshift({ ShortName: current, Locale: current.slice(0, 5), Gender: "" });
+  const groups = {};
+  for (const v of list) (groups[v.Locale] ||= []).push(v);
+  return Object.keys(groups).sort().map((loc) => {
+    const [l, r] = loc.split("-");
+    const label = l === "en" ? `English (${regionName(r)})` : `${langName(l)} (${regionName(r)})`;
+    return `<optgroup label="${esc(label)}">` + groups[loc].map((v) =>
+      `<option value="${v.ShortName}" ${v.ShortName === current ? "selected" : ""}>${esc(voiceLabel(v))}</option>`).join("") + "</optgroup>";
+  }).join("");
+}
+const shortVoice = (id) => (id || "").split("-").slice(2).join("-").replace(/(Multilingual)?Neural$/, "");
+
+function renderProfiles() {
+  const q = norm($("#profileSearch").value || "");
+  const box = $("#profileList"); box.innerHTML = "";
+  const shown = S.profiles.filter((p) => !q || norm(p.name).includes(q) || (p.aliases || []).some((a) => norm(a).includes(q)));
+  const groups = [];
+  for (const p of shown) { let g = groups.find((x) => x.name === (p.group || "My profiles")); if (!g) groups.push(g = { name: p.group || "My profiles", items: [] }); g.items.push(p); }
+  groups.sort((a, b) => (a.name === "My profiles" ? -1 : b.name === "My profiles" ? 1 : 0));
+  for (const g of groups) {
+    const h = document.createElement("div"); h.className = "profile-group"; h.textContent = g.name; box.append(h);
+    for (const p of g.items) {
+      const row = document.createElement("div"); row.className = "profile-row";
+      const extra = [p.aliases?.length ? "Also matches: " + p.aliases.join(", ") : "", p.alt ? `Second voice: ${shortVoice(p.alt)}` : "",
+        p.rate ? `Speed ${p.rate > 0 ? "+" : ""}${p.rate}%` : "", p.pitch ? `Pitch ${p.pitch > 0 ? "+" : ""}${p.pitch}` : ""].filter(Boolean).join(" · ");
+      row.innerHTML = `<input value="${esc(p.name)}" maxlength="60" aria-label="Profile name">
+        <select class="voice-select" aria-label="Voice">${allVoiceOptions(p.voice)}</select>
+        <button class="mini" title="Listen"><svg><use href="#i-speaker"/></svg></button>
+        <button class="mini" title="Delete profile"><svg><use href="#i-x"/></svg></button>
+        ${extra ? `<div class="aka">${esc(extra)}</div>` : ""}`;
+      const [nameIn, voiceSel] = [$("input", row), $("select", row)];
+      const [listen, del] = $$(".mini", row);
+      nameIn.onchange = () => {
+        const v = nameIn.value.replace(/:/g, "").trim();
+        if (!v || S.profiles.some((x) => x !== p && norm(x.name) === norm(v))) {
+          toast(v ? `There is already a profile called “${v}”.` : "A profile needs a name.", { error: true }); nameIn.value = p.name; return;
+        }
+        p.name = v; persistProfiles(); renderCast();
+      };
+      voiceSel.onchange = () => { p.voice = voiceSel.value; persistProfiles(); renderCast(); };
+      listen.onclick = (e) => preview({ voice: p.voice, rate: p.rate || 0, pitch: p.pitch || 0 }, e.currentTarget);
+      del.onclick = () => {
+        const i = S.profiles.indexOf(p); S.profiles.splice(i, 1); persistProfiles(true); renderProfiles(); renderCast();
+        toast(`Deleted “${p.name}”.`, { actions: [["Undo", () => { S.profiles.splice(i, 0, p); persistProfiles(true); renderProfiles(); renderCast(); }]] });
+      };
+      box.append(row);
+    }
+  }
+  if (!shown.length) box.innerHTML = `<p class="hint" style="padding:12px 4px">${q ? "No profile matches your search." : "No voice profiles yet."}</p>`;
+}
+function openProfiles() { $("#settings").hidden = true; $("#profilesSheet").hidden = false; $("#profileSearch").value = ""; renderProfiles(); }
+function closeProfiles() { $("#profilesSheet").hidden = true; persistProfiles(true); }
+$("#manageProfilesBtn").onclick = openProfiles;
+$("[data-close-profiles]").onclick = closeProfiles;
+$("#profilesSheet").onclick = (e) => { if (e.target.id === "profilesSheet") closeProfiles(); };
+$("#profileSearch").oninput = renderProfiles;
+$("#addProfileBtn").onclick = () => {
+  let name = "New profile", n = 2;
+  while (S.profiles.some((p) => norm(p.name) === norm(name))) name = `New profile ${n++}`;
+  S.profiles.unshift({ name, voice: "en-US-AvaNeural", alt: null, rate: 0, pitch: 0, aliases: [], group: "My profiles" });
+  persistProfiles(true); $("#profileSearch").value = ""; renderProfiles();
+  const input = $("#profileList .profile-row input"); input?.focus(); input?.select();
+};
+$("#resetProfilesBtn").onclick = async () => {
+  const sure = window.pywebview ? await api.ask("Restore default profiles?", "Your own profiles and changes will be replaced by the built-in profiles.")
+    : confirm("Restore the built-in profiles? Your own profiles will be removed.");
+  if (!sure) return;
+  const r = await api.reset_profiles(); if (r.ok) { S.profiles = r.profiles; fillProfileNames(); renderProfiles(); renderCast(); toast("Default profiles restored."); }
+};
+$("#exportProfilesBtn").onclick = async () => {
+  const r = await api.export_profiles(S.profiles);
+  if (r.ok) toast("Profiles exported. Share the file with colleagues; they can import it in Parley.");
+  else if (r.error) toast(r.error, { error: true });
+};
+$("#importProfilesBtn").onclick = async () => {
+  const r = await api.import_profiles(S.profiles);
+  if (!r.ok) { if (r.error) toast(r.error, { error: true }); return; }
+  S.profiles = r.profiles; fillProfileNames(); renderProfiles(); renderCast(); toast(`Imported ${r.count} profiles.`);
+};
 
 function showUpdate(u, needed = false) {
   S.update = u;
@@ -587,7 +728,10 @@ document.addEventListener("keydown", (e) => {
   if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); saveProject(); }
   else if (mod && e.key.toLowerCase() === "o") { e.preventDefault(); e.stopPropagation(); toggleMenu("#openMenu"); }
   else if (mod && e.key === "Enter") { e.preventDefault(); create(); }
-  else if (e.key === "Escape") { $$(".menu").forEach((x) => (x.hidden = true)); $("#settings").hidden = true; $("#toast").hidden = true; }
+  else if (e.key === "Escape") {
+    $$(".menu").forEach((x) => (x.hidden = true)); $("#settings").hidden = true; $("#toast").hidden = true;
+    if (!$("#profilesSheet").hidden) closeProfiles();
+  }
   else if (e.key === " " && !typing && S.audio) { e.preventDefault(); $("#playBtn").click(); }
 });
 
@@ -596,6 +740,8 @@ async function start() {
   S.info = await api.init();
   S.ocr = S.info.ocr; $("#openImageItem").hidden = !S.ocr;
   S.allLanguages = !!S.info.settings?.allLanguages;
+  S.profiles = (await api.get_profiles()) || [];
+  fillProfileNames();
   loadState({ mode: "dialogue", lines: [], characters: [], narration: "" });
   const v = await api.voices();
   S.voices = v.voices;

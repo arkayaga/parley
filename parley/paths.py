@@ -7,6 +7,10 @@ from pathlib import Path
 
 
 def data_dir() -> Path:
+    if os.environ.get("PARLEY_DATA_DIR"):  # tests and portable use
+        path = Path(os.environ["PARLEY_DATA_DIR"])
+        path.mkdir(parents=True, exist_ok=True)
+        return path
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     elif sys.platform == "darwin":

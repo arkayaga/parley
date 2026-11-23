@@ -18,7 +18,7 @@ FALLBACK_VOICES = [
     {"ShortName": "en-GB-SoniaNeural", "Gender": "Female", "Locale": "en-GB"},
     {"ShortName": "en-GB-RyanNeural", "Gender": "Male", "Locale": "en-GB"},
     {"ShortName": "en-AU-NatashaNeural", "Gender": "Female", "Locale": "en-AU"},
-    {"ShortName": "en-AU-WilliamNeural", "Gender": "Male", "Locale": "en-AU"},
+    {"ShortName": "en-AU-WilliamMultilingualNeural", "Gender": "Male", "Locale": "en-AU"},
 ]
 
 

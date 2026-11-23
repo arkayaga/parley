@@ -1,11 +1,14 @@
 """End-to-end smoke test of the real window: loads the example, creates audio
 through the JS bridge and checks the result. Run: python tests/e2e_app.py"""
 import json
+import os
 import sys
-import threading
+import tempfile
 import time
 from pathlib import Path
 
+# A fresh data folder, as on a first install.
+os.environ["PARLEY_DATA_DIR"] = tempfile.mkdtemp(prefix="parley-e2e-")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import webview  # noqa: E402
@@ -42,6 +45,13 @@ def drive(window):
     # edit -> stale
     js("const t=document.querySelector('.line textarea'); t.value += ' Thanks!'; t.dispatchEvent(new Event('input'))")
     result["afterEdit"] = js("document.querySelector('#createBtn').textContent")
+    # voice profiles: defaults on first run, then edits must persist
+    result["profilesAtStart"] = js("S.profiles.length")
+    result["baristaVoice"] = js("S.cast.Barista.voice")
+    js("S.cast.Customer.voice = 'en-GB-RyanNeural'; saveAsProfile(S.cast.Customer)")
+    js("S.profiles.splice(S.profiles.findIndex(p => p.name === 'Pilot'), 1); persistProfiles(true)", 0.5)
+    js("S.profiles.unshift({name: 'Coach', voice: 'en-US-GuyNeural', alt: null, rate: 10, pitch: 0, aliases: [], group: 'My profiles'}); persistProfiles(true)", 0.5)
+    time.sleep(1)
     app_api.dirty = False
     window.destroy()
 
@@ -51,7 +61,15 @@ w = webview.create_window("Parley test", url=(app.resource_dir() / "ui" / "index
                           width=1180, height=780)
 app_api.window = w
 webview.start(drive, w)
+from parley import profiles  # noqa: E402
+
+saved = {p["name"]: p for p in profiles.load()}  # what the next start of the app will see
+result["savedCustomer"] = saved["Customer"]["voice"]
+result["pilotDeleted"] = "Pilot" not in saved
+result["coachSaved"] = saved.get("Coach", {}).get("rate")
 print(json.dumps(result, indent=1))
 ok = (result.get("lines") == 5 and result.get("exportVisible") and result.get("playing")
-      and result.get("afterEdit") == "Update audio")
+      and result.get("afterEdit") == "Update audio"
+      and result["profilesAtStart"] == len(profiles.DEFAULT_PROFILES) and result["baristaVoice"] == "en-NZ-MollyNeural"
+      and result["savedCustomer"] == "en-GB-RyanNeural" and result["pilotDeleted"] and result["coachSaved"] == 10)
 sys.exit(0 if ok else 1)

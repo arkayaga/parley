@@ -17,7 +17,7 @@ engine_update.activate_saved()
 
 import webview  # noqa: E402
 
-from parley import ocr_win, project, tts, updater  # noqa: E402
+from parley import ocr_win, profiles, project, tts, updater  # noqa: E402
 from parley.cache import ClipCache  # noqa: E402
 from parley.paths import resource_dir  # noqa: E402
 from parley.script import decode_text_file, looks_like_dialogue, parse_script  # noqa: E402
@@ -270,6 +270,43 @@ class Api:
             return _error(exc)
         threading.Timer(0.5, lambda: os._exit(0)).start()
         return {"ok": True}
+
+    def ask(self, title, message):
+        return self.window.create_confirmation_dialog(title, message)
+
+    # ----- voice profiles ---------------------------------------------------------
+    def get_profiles(self):
+        return profiles.load()
+
+    def save_profiles(self, items):
+        try:
+            return {"ok": True, "profiles": profiles.save(items)}
+        except Exception as exc:
+            return _error(exc)
+
+    def reset_profiles(self):
+        return {"ok": True, "profiles": profiles.reset()}
+
+    def export_profiles(self, items):
+        path = self._dialog(webview.FileDialog.SAVE, save_filename="Parley voice profiles.json",
+                            file_types=("Parley voice profiles (*.json)",))
+        if not path:
+            return {"ok": False}
+        try:
+            profiles.export(path, items)
+        except Exception as exc:
+            return _error(exc)
+        return {"ok": True, "path": path}
+
+    def import_profiles(self, items):
+        path = self._dialog(webview.FileDialog.OPEN, file_types=("Parley voice profiles (*.json)",))
+        if not path:
+            return {"ok": False}
+        try:
+            merged, count = profiles.import_file(path, items)
+        except Exception as exc:
+            return _error(exc)
+        return {"ok": True, "profiles": merged, "count": count}
 
     def clear_cache(self):
         self.cache.clear()

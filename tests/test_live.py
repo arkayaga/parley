@@ -25,5 +25,9 @@ def test_dialogue_render(tmp_path):
 def test_voices_list():
     import asyncio
 
-    voices = asyncio.run(tts.list_voices())
-    assert any(v["ShortName"] == "en-US-AvaNeural" for v in voices)
+    from parley.profiles import DEFAULT_PROFILES
+
+    names = {v["ShortName"] for v in asyncio.run(tts.list_voices())}
+    used = {p["voice"] for p in DEFAULT_PROFILES} | {p["alt"] for p in DEFAULT_PROFILES if p["alt"]}
+    used |= {v["ShortName"] for v in tts.FALLBACK_VOICES}
+    assert used <= names, f"voices no longer offered by the service: {sorted(used - names)}"
