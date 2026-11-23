@@ -741,6 +741,11 @@ async function start() {
   S.ocr = S.info.ocr; $("#openImageItem").hidden = !S.ocr;
   S.allLanguages = !!S.info.settings?.allLanguages;
   S.profiles = (await api.get_profiles()) || [];
+  if (!window.pywebview) {
+    // Opened as a plain web page: there is no Python side, so only sample data is shown.
+    $("#bannerText").textContent = "Design preview only: this page was opened in a web browser. Open the Parley app to create audio and see all voice profiles.";
+    $("#bannerAction").hidden = true; $("#banner").hidden = false;
+  }
   fillProfileNames();
   loadState({ mode: "dialogue", lines: [], characters: [], narration: "" });
   const v = await api.voices();
